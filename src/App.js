@@ -1,116 +1,107 @@
-// 1. וודא שה-State שלך מוגדר ככה בתחילת הקומפוננטה:
-const [analysisResult, setAnalysisResult] = useState(null);
-const [error, setError] = useState(null);
-const [isAnalyzing, setIsAnalyzing] = useState(false);
+import React, { useState } from 'react';
 
-// 2. הפונקציה המעודכנת והבטוחה:
-const startAnalysis = async () => {
-  if (!uploadedFiles || uploadedFiles.length === 0) {
-    setError("נא להעלות קבצים תחילה.");
-    return;
-  }
+const FinancialAnalyzer = () => {
+  // 1. הגדרת משתנים (States) - תמיד בתחילת הפונקציה
+  const [uploadedFiles, setUploadedFiles] = useState([]);
+  const [analysisResult, setAnalysisResult] = useState(null);
+  const [error, setError] = useState(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
   
-  setIsAnalyzing(true);
-  setError(null);
-  setAnalysisResult(null);
+  const API_KEY = "המפתח_שלך_כאן"; 
 
-  try {
-    // עיבוד קבצים - הוספנו בדיקה לכל קובץ
-    const filesParts = await Promise.all(
-      uploadedFiles.map(async (file) => {
-        try {
-          return await processFile(file);
-        } catch (e) {
-          throw new Error(`שגיאה בעיבוד הקובץ ${file.name}`);
-        }
-      })
-    );
-    
-    const promptText = `Analyze financial data, provide DCF and 8 Pillars. Return JSON only.`;
-    const requestBody = {
-      contents: [{ parts: [{ text: promptText }, ...filesParts] }],
-      tools: [{ googleSearch: {} }], 
-      generationConfig: { temperature: 0.1, responseMimeType: "application/json" }
-    };
+  // ---------------------------------------------------------
+  // 2. חלק הלוגיקה: הפונקציה startAnalysis
+  // ---------------------------------------------------------
+  const startAnalysis = async () => {
+    if (uploadedFiles.length === 0) return;
+    setIsAnalyzing(true);
+    setError(null);
+    setAnalysisResult(null);
 
-    // ניסיון ראשון - Gemini 2.0
-    let modelName = "gemini-2.0-flash";
-    let url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${API_KEY}`;
-    
-    let response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody)
-    });
+    try {
+      // כאן אמורה להיות פונקציית ה-processFile שלך
+      const filesParts = await Promise.all(uploadedFiles.map(file => processFile(file)));
+      
+      const requestBody = {
+        contents: [{ parts: [{ text: "Analyze financial data, provide DCF and 8 Pillars. Return JSON only." }, ...filesParts] }],
+        tools: [{ googleSearch: {} }], 
+        generationConfig: { temperature: 0.1, responseMimeType: "application/json" }
+      };
 
-    let data = await response.json();
-
-    // בדיקת מכסה (Quota) ומעבר ל-1.5 פלאש
-    if (!response.ok && (response.status === 429 || JSON.stringify(data).includes('quota'))) {
-      console.warn("Quota full, switching to 1.5 Flash...");
-      modelName = "gemini-1.5-flash";
-      url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${API_KEY}`;
-      response = await fetch(url, {
+      let modelName = "gemini-2.0-flash";
+      let url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${API_KEY}`;
+      
+      let response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(requestBody)
       });
-      data = await response.json();
-    }
 
-    if (!response.ok) {
-      throw new Error(data.error?.message || "שגיאה בתקשורת עם השרת");
-    }
+      let data = await response.json();
 
-    const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!rawText) throw new Error("השרת החזיר תשובה ריקה");
+      // ניסיון שני אם נגמרה המכסה
+      if (!response.ok && (response.status === 429 || JSON.stringify(data).includes('quota'))) {
+        modelName = "gemini-1.5-flash"; 
+        url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${API_KEY}`;
+        response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody)
+        });
+        data = await response.json();
+      }
 
-    // פענוח בטוח
-    try {
+      if (!response.ok) throw new Error(data.error?.message || "שגיאה ב-API");
+
+      const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      
+      // הפיכת הטקסט לאובייקט בצורה בטוחה
       const cleanJson = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
-      const parsed = JSON.parse(cleanJson);
-      setAnalysisResult(parsed); // כאן אנחנו שומרים אובייקט
-    } catch (e) {
-      console.error("JSON Parse Error:", rawText);
-      setError("המידע שחזר מהשרת אינו בפורמט תקין.");
-    }
+      setAnalysisResult(JSON.parse(cleanJson));
 
-  } catch (err) {
-    console.error("Critical Error:", err);
-    setError(err.message);
-  } finally {
-    setIsAnalyzing(false);
-  }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  // ---------------------------------------------------------
+  // 3. חלק התצוגה (Return): מה שהמשתמש רואה על המסך
+  // ---------------------------------------------------------
+  return (
+    <div style={{ padding: '20px', maxWidth: '800px', margin: '0 auto', textAlign: 'right', direction: 'rtl' }}>
+      <h1 className="text-2xl font-bold mb-4">מנתח מניות פיננסי</h1>
+      
+      {/* כפתור הפעלה */}
+      <button 
+        onClick={startAnalysis}
+        disabled={isAnalyzing}
+        className="bg-blue-600 text-white px-4 py-2 rounded"
+      >
+        {isAnalyzing ? "מנתח נתונים..." : "התחל ניתוח"}
+      </button>
+
+      {/* הצגת שגיאה - אם יש כזו */}
+      {error && (
+        <div className="mt-4 p-4 bg-red-100 text-red-700 border border-red-400 rounded">
+          <strong>שגיאה:</strong> {error}
+        </div>
+      )}
+
+      {/* הצגת התוצאה - כאן התיקון הקריטי למניעת "דף לבן" */}
+      {analysisResult && (
+        <div className="mt-6 p-4 border rounded bg-gray-50 text-right">
+          <h2 className="text-xl font-bold mb-2">תוצאות:</h2>
+          
+          {/* אנחנו משתמשים ב-JSON.stringify כדי להציג את האובייקט כטקסט */}
+          <pre style={{ direction: 'ltr', textAlign: 'left', backgroundColor: '#fff', padding: '10px', overflow: 'auto' }}>
+            {JSON.stringify(analysisResult, null, 2)}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
 };
 
-// 3. חלק ה-JSX (מה שמוצג על המסך) - זה החלק שמונע "דף לבן":
-return (
-  <div className="p-6 max-w-4xl mx-auto">
-    <button 
-      onClick={startAnalysis}
-      disabled={isAnalyzing}
-      className="bg-blue-500 text-white p-2 rounded"
-    >
-      {isAnalyzing ? "מנתח..." : "התחל ניתוח"}
-    </button>
-
-    {/* הצגת שגיאה בצורה בטוחה (מחרוזת בלבד) */}
-    {error && (
-      <div className="mt-4 p-4 bg-red-100 text-red-800 rounded">
-        {String(error)} 
-      </div>
-    )}
-
-    {/* הצגת תוצאה בצורה שלא קורסת */}
-    {analysisResult && (
-      <div className="mt-6 p-4 border rounded bg-white shadow">
-        <h2 className="text-xl font-bold border-b pb-2 mb-4">תוצאות:</h2>
-        
-        {/* שימוש ב-pre ו-JSON.stringify מונע מ-React לקרוס על אובייקטים */}
-        <pre className="overflow-auto max-h-96 text-left dir-ltr bg-gray-50 p-4 rounded text-xs">
-          {JSON.stringify(analysisResult, null, 2)}
-        </pre>
-      </div>
-    )}
-  </div>
-);
+export default FinancialAnalyzer;
